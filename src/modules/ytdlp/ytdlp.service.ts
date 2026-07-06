@@ -172,36 +172,40 @@ export class YtdlpService implements OnModuleInit {
     const ffmpegFilename = `ffmpeg${ffmpegExt}`;
     this.ffmpegPath = path.join(this.binariesDir, ffmpegFilename);
 
+    // Setup yt-dlp
     try {
-      // Check if binaries exist
       await fs.access(this.ytdlpPath);
-
-      // Try system ffmpeg first
-      try {
-        await execAsync('ffmpeg -version');
-        this.ffmpegPath = 'ffmpeg'; // Use system ffmpeg
-        console.log('Using system ffmpeg');
-      } catch {
-        await fs.access(this.ffmpegPath);
-      }
+      console.log('yt-dlp binary found');
     } catch {
-      // Download missing binaries
-      console.log('Binary files not found, starting download...');
-
+      console.log('yt-dlp not found, downloading...');
       try {
         await this.downloadFile(urls.ytdlp, this.ytdlpPath);
         await fs.chmod(this.ytdlpPath, 0o755);
+        console.log('yt-dlp downloaded successfully');
+      } catch (error) {
+        throw new Error(`Failed to download yt-dlp: ${error.message}`);
+      }
+    }
 
-        if (this.ffmpegPath !== 'ffmpeg') {
+    // Setup ffmpeg - try system first, then local binary
+    try {
+      await execAsync('ffmpeg -version');
+      this.ffmpegPath = 'ffmpeg';
+      console.log('Using system ffmpeg');
+    } catch {
+      try {
+        await fs.access(this.ffmpegPath);
+        console.log('Using local ffmpeg binary');
+      } catch {
+        console.log('ffmpeg not found, downloading...');
+        try {
           const ffmpegZip = path.join(this.binariesDir, 'ffmpeg.zip');
           await this.downloadFile(urls.ffmpeg, ffmpegZip);
-          // The ZIP extraction is handled in downloadFile
           await fs.chmod(this.ffmpegPath, 0o755);
+          console.log('ffmpeg downloaded successfully');
+        } catch (error) {
+          throw new Error(`Failed to download ffmpeg: ${error.message}`);
         }
-
-        console.log('Binary files downloaded successfully');
-      } catch (error) {
-        throw new Error(`Failed to download binary files: ${error.message}`);
       }
     }
   }
@@ -308,6 +312,44 @@ export class YtdlpService implements OnModuleInit {
     return this.ytdlp(command).then((result) => {
       return JSON.parse(result.stdout);
     });
+  }
+
+  /**
+   * Get direct CDN download URL for a video without downloading to server.
+   * The browser downloads directly from the CDN — zero server disk/RAM usage.
+   */
+  async getDirectUrl(
+    url: string,
+    quality?: string,
+    format?: string,
+    type: 'video' | 'audio' = 'video',
+  ): Promise<{ url: string; filename: string }> {
+    const args: string[] = ['--get-url', '--get-filename'];
+
+    if (type === 'audio') {
+      args.push('-f', 'bestaudio[protocol=https]/bestaudio[protocol=http]/bestaudio');
+    } else {
+      const heightMap: Record<string, number> = {
+        '144p': 144, '240p': 240, '360p': 360, '480p': 480,
+        '720p': 720, '1080p': 1080, '1440p': 1440, '2160p': 2160,
+      };
+      const height = heightMap[quality || '720p'] || 720;
+      // Use combined video+audio stream over HTTPS for direct browser download.
+      // YouTube only has combined streams up to 720p; higher quality requires
+      // separate video+audio which can't be directly downloaded by browser.
+      args.push('-f', `best[height<=${height}][protocol=https]/best[height<=${height}][protocol=http]/best[protocol=https]/best[protocol=http]/best`);
+    }
+
+    args.push(url);
+
+    const result = await this.ytdlp(args);
+    const lines = result.stdout.trim().split('\n').filter(l => l.trim());
+
+    // --get-url outputs URL first, --get-filename outputs filename after
+    const directUrl = lines[0] || '';
+    const filename = lines[1] || 'video.mp4';
+
+    return { url: directUrl, filename };
   }
 
   async getYoutubePlaylistInfo(url: string): Promise<PlaylistVideoInfo[]> {

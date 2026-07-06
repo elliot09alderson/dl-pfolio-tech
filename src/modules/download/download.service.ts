@@ -71,6 +71,7 @@ export class DownloadService {
         'Accept-Ranges': 'bytes',
         'Content-Length': chunkSize,
         'Content-Type': 'application/octet-stream',
+        'Content-Disposition': `attachment; filename="${encodeURIComponent(filename)}"`,
       };
 
       return { stream, headers };
@@ -81,6 +82,7 @@ export class DownloadService {
       'Content-Length': fileSize,
       'Content-Type': 'application/octet-stream',
       'Accept-Ranges': 'bytes',
+      'Content-Disposition': `attachment; filename="${encodeURIComponent(filename)}"`,
     };
 
     return { stream, headers };

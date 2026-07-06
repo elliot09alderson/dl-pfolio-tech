@@ -1,0 +1,16 @@
+{
+  "name": "VidGrab - Social Media Video Downloader",
+  "short_name": "VidGrab",
+  "description": "Download videos from YouTube, Instagram, TikTok, Facebook & Twitter/X",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#06060b",
+  "theme_color": "#00e0d0",
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml"
+    }
+  ]
+}

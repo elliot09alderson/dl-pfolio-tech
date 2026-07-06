@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Controller,
   Get,
   Param,
@@ -175,9 +176,54 @@ export class DownloadController {
   }
 
   @ApiSecurity('X-API-Key')
+  @Post('direct')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Get direct CDN download URL (no server-side download)',
+    description:
+      'Returns the direct CDN URL for the video/audio. The browser downloads directly from the source — zero server disk/RAM usage. Ideal for large videos.',
+  })
+  @UseGuards(ValidUrlGuard)
+  @ApiResponse({
+    status: HttpStatus.OK,
+    description: 'Direct download URL retrieved',
+  })
+  @ApiResponse({
+    status: HttpStatus.BAD_REQUEST,
+    description: 'Invalid URL or format not available',
+  })
+  async getDirectUrl(
+    @Body()
+    body: {
+      url: string;
+      quality?: string;
+      extension?: string;
+      type?: 'video' | 'audio';
+    },
+  ) {
+    try {
+      const ytdlpService = (this.downloadService as any).ytdlp;
+      const result = await ytdlpService.getDirectUrl(
+        body.url,
+        body.quality,
+        body.extension,
+        body.type || 'video',
+      );
+      return {
+        directUrl: result.url,
+        filename: result.filename,
+      };
+    } catch (error) {
+      throw new BadRequestException(
+        error.message || 'Failed to get direct URL',
+      );
+    }
+  }
+
+  @ApiSecurity('X-API-Key')
   @Post('video')
   @HttpCode(HttpStatus.ACCEPTED)
-  @ApiOperation({ summary: 'Start video download' })
+  @ApiOperation({ summary: 'Start video download (server-side)' })
   @ApiBody({ type: DownloadVideoDto })
   @UseGuards(ValidUrlGuard)
   @ApiResponse({
