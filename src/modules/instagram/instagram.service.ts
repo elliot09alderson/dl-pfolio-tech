@@ -1,13 +1,19 @@
 import { Injectable } from '@nestjs/common';
 import { https } from 'follow-redirects';
+import { execFile } from 'child_process';
+import { promisify } from 'util';
 import * as fs from 'fs';
 import * as path from 'path';
+import * as os from 'os';
+
+const execFileAsync = promisify(execFile);
 
 export interface InstaMediaInfo {
   videoUrl: string;
   thumbnailUrl?: string;
   title?: string;
   username?: string;
+  needsYtdlp?: boolean; // extracted via yt-dlp; download must merge DASH streams via yt-dlp too
 }
 
 @Injectable()
@@ -161,6 +167,51 @@ export class InstagramService {
     });
   }
 
+  private get ytdlpPath(): string {
+    const ext = os.platform() === 'win32' ? '.exe' : '';
+    return path.join(process.cwd(), 'bin', `yt-dlp${ext}`);
+  }
+
+  /**
+   * Strategy 3: yt-dlp fallback. Handles reels where Instagram strips
+   * video_url from the embed page AND blocks GraphQL from datacenter IPs.
+   */
+  private async fetchViaYtdlp(url: string): Promise<InstaMediaInfo> {
+    const { stdout } = await execFileAsync(
+      this.ytdlpPath,
+      ['--no-warnings', '-J', url],
+      { maxBuffer: 50 * 1024 * 1024, timeout: 90_000 },
+    );
+    const json = JSON.parse(stdout);
+    const username = json.uploader_id || json.uploader || '';
+    console.log(`[Instagram] yt-dlp: got media for @${username || 'unknown'}`);
+    return {
+      videoUrl: '', // DASH streams need yt-dlp+ffmpeg merge; no single direct URL
+      thumbnailUrl: json.thumbnail || '',
+      title: json.title || (username ? `Reel by @${username}` : 'Instagram video'),
+      username,
+      needsYtdlp: true,
+    };
+  }
+
+  private async downloadViaYtdlp(url: string, filePath: string): Promise<void> {
+    await execFileAsync(
+      this.ytdlpPath,
+      [
+        '--no-warnings',
+        '-f', 'bv*+ba/b',
+        '--merge-output-format', 'mp4',
+        '-o', filePath,
+        url,
+      ],
+      { maxBuffer: 10 * 1024 * 1024, timeout: 300_000 },
+    );
+    if (!fs.existsSync(filePath)) {
+      throw new Error('yt-dlp finished but output file is missing');
+    }
+    console.log(`[Instagram] yt-dlp downloaded: ${path.basename(filePath)}`);
+  }
+
   async getMediaInfo(url: string): Promise<InstaMediaInfo> {
     const shortcode = this.extractShortcode(url);
     console.log(`[Instagram] Extracting media for shortcode: ${shortcode}`);
@@ -239,6 +290,14 @@ export class InstagramService {
       console.log(`[Instagram] GraphQL fallback failed: ${err.message}`);
     }
 
+    // Strategy 3: yt-dlp (GraphQL is login-walled for datacenter IPs)
+    console.log('[Instagram] Trying yt-dlp fallback...');
+    try {
+      return await this.fetchViaYtdlp(url);
+    } catch (err) {
+      console.log(`[Instagram] yt-dlp fallback failed: ${err.message}`);
+    }
+
     throw new Error(
       'Could not extract video URL. The content may be private or Instagram has changed their page structure.',
     );
@@ -249,6 +308,11 @@ export class InstagramService {
     const shortcode = this.extractShortcode(url);
     const filename = `instagram_${shortcode}_${Date.now()}.mp4`;
     const filePath = path.join(this.downloadPath, filename);
+
+    if (info.needsYtdlp) {
+      await this.downloadViaYtdlp(url, filePath);
+      return { filename, info };
+    }
 
     return new Promise((resolve, reject) => {
       const file = fs.createWriteStream(filePath);

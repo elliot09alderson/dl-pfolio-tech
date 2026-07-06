@@ -176,16 +176,8 @@ export default function Downloader() {
     []
   );
 
-  const MAX_DURATION = 1800; // 30 minutes in seconds
-
   const startDownload = useCallback(async () => {
     if (!url || !platform || !videoInfo) return;
-
-    // Check duration limit (server-side downloads use bandwidth + CPU)
-    if (videoInfo.duration && videoInfo.duration > MAX_DURATION) {
-      setError(`Video is ${Math.round(videoInfo.duration / 60)} minutes long. Max allowed is 30 minutes to save server resources.`);
-      return;
-    }
 
     setDownloading(true);
     setCompleted(false);

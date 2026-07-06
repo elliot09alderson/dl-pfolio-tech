@@ -37,7 +37,8 @@ export class DownloadService {
     const apiKey = (req as any).apiKey;
     const info = await this.ytdlp.getYtdlpVideoInfo(url);
 
-    if (info.duration > apiKey.maxDuration) {
+    // null/0 maxDuration means unlimited
+    if (apiKey.maxDuration && info.duration > apiKey.maxDuration) {
       throw new BadRequestException(
         `Video duration (${Math.round(info.duration / 60)} minutes) exceeds the allowed limit (${Math.round(apiKey.maxDuration / 60)} minutes)`,
       );
